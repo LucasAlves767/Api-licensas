@@ -7,7 +7,7 @@ app = Flask(__name__)
 CORS(app)
 
 DB_FILE = "licencas.json"
-ADMIN_TOKEN = "ADMIN_TOKEN_SUPER_SECRETO" # Use este no seu admin.html
+ADMIN_TOKEN = "ADMIN_TOKEN_SUPER_SECRETO" 
 
 def load_licencas():
     if not os.path.exists(DB_FILE): return {}
