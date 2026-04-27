@@ -1,8 +1,12 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 from datetime import datetime, timedelta, timezone
 import json, os, secrets, string
 
 app = Flask(__name__)
+
+# 🔥 LIBERA ACESSO (RESOLVE FAILED TO FETCH)
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 # ================================
 # CONFIG
@@ -11,7 +15,7 @@ ADMIN_TOKEN = "ADMIN_TOKEN_SUPER_SECRETO"
 DATA_FILE = "licencas.json"
 
 # ================================
-# BANCO SIMPLES (JSON)
+# BANCO (JSON)
 # ================================
 def load_licencas():
     if not os.path.exists(DATA_FILE):
@@ -24,52 +28,67 @@ def save_licencas(data):
         json.dump(data, f, indent=2)
 
 # ================================
-# 🔥 VALIDAÇÃO PRINCIPAL (SEU APP USA)
+# 🔥 VALIDAÇÃO (SEU SISTEMA USA)
 # ================================
 @app.route("/", methods=["POST"])
 def validar_licenca():
-    data = request.json
-
-    email = data.get("usuario_nome")  # IMPORTANTÍSSIMO
-
-    licencas = load_licencas()
-    lic = licencas.get(email)
-
-    if not lic:
-        return jsonify({
-            "ativo": False,
-            "mensagem": "Licença não encontrada"
-        }), 403
-
-    if not lic.get("ativo"):
-        return jsonify({
-            "ativo": False,
-            "mensagem": "Acesso bloqueado"
-        }), 403
-
-    # valida expiração
     try:
-        exp = datetime.strptime(lic["expira_em"], "%Y-%m-%d")
-        if datetime.now() > exp:
+        data = request.json
+        email = data.get("usuario_nome")
+
+        if not email:
             return jsonify({
                 "ativo": False,
-                "mensagem": "Licença expirada"
-            }), 403
-    except:
-        pass
+                "mensagem": "Email não enviado"
+            }), 400
 
-    return jsonify({
-        "ativo": True,
-        "mensagem": "OK",
-        "expira_em": lic["expira_em"]
-    })
+        licencas = load_licencas()
+        lic = licencas.get(email)
+
+        if not lic:
+            return jsonify({
+                "ativo": False,
+                "mensagem": "Licença não encontrada"
+            }), 403
+
+        if not lic.get("ativo"):
+            return jsonify({
+                "ativo": False,
+                "mensagem": "Acesso bloqueado"
+            }), 403
+
+        # valida expiração
+        try:
+            exp = datetime.strptime(lic["expira_em"], "%Y-%m-%d")
+            if datetime.now() > exp:
+                return jsonify({
+                    "ativo": False,
+                    "mensagem": "Licença expirada"
+                }), 403
+        except:
+            return jsonify({
+                "ativo": False,
+                "mensagem": "Erro na data da licença"
+            }), 500
+
+        return jsonify({
+            "ativo": True,
+            "mensagem": "OK",
+            "expira_em": lic["expira_em"]
+        })
+
+    except Exception as e:
+        return jsonify({
+            "ativo": False,
+            "mensagem": str(e)
+        }), 500
 
 # ================================
 # 🔥 GERAR LICENÇA
 # ================================
 @app.route('/admin/licencas/gerar', methods=['POST'])
 def gerar():
-    if request.headers.get("Authorization") != ADMIN_TOKEN:
+    if request.headers.get("Authorization", "").strip() != ADMIN_TOKEN:
         return jsonify({"erro": "Não autorizado"}), 401
     
     data = request.json
@@ -77,26 +96,28 @@ def gerar():
     email = data.get("email")
     dias = int(data.get("dias", 30))
 
-    # gerar senha
+    if not email:
+        return jsonify({"erro": "Email obrigatório"}), 400
+
     caracteres = string.ascii_uppercase + string.digits
-    senha_gerada = ''.join(secrets.choice(caracteres) for _ in range(8))
+    senha = ''.join(secrets.choice(caracteres) for _ in range(8))
 
     licencas = load_licencas()
-    data_expira = datetime.now(timezone.utc) + timedelta(days=dias)
+    expira = datetime.now(timezone.utc) + timedelta(days=dias)
 
     licencas[email] = {
         "nome": nome,
         "email": email,
-        "chave": senha_gerada,
+        "chave": senha,
         "ativo": True,
-        "expira_em": data_expira.strftime("%Y-%m-%d")
+        "expira_em": expira.strftime("%Y-%m-%d")
     }
 
     save_licencas(licencas)
 
     return jsonify({
         "status": "sucesso",
-        "senha": senha_gerada
+        "senha": senha
     })
 
 # ================================
@@ -104,23 +125,39 @@ def gerar():
 # ================================
 @app.route('/admin/licencas', methods=['GET'])
 def listar():
-    if request.headers.get("Authorization") != ADMIN_TOKEN:
+    if request.headers.get("Authorization", "").strip() != ADMIN_TOKEN:
         return jsonify({"erro": "Não autorizado"}), 401
 
     return jsonify(load_licencas())
 
 # ================================
-# 🔥 BLOQUEAR LICENÇA
+# 🔥 BLOQUEAR (DESATIVAR)
 # ================================
 @app.route('/admin/licencas/remover/<email>', methods=['DELETE'])
 def remover(email):
-    if request.headers.get("Authorization") != ADMIN_TOKEN:
+    if request.headers.get("Authorization", "").strip() != ADMIN_TOKEN:
         return jsonify({"erro": "Não autorizado"}), 401
 
     licencas = load_licencas()
 
     if email in licencas:
         licencas[email]["ativo"] = False
+        save_licencas(licencas)
+
+    return jsonify({"ok": True})
+
+# ================================
+# 🔥 EXCLUIR PERMANENTE
+# ================================
+@app.route('/admin/licencas/excluir/<email>', methods=['DELETE'])
+def excluir(email):
+    if request.headers.get("Authorization", "").strip() != ADMIN_TOKEN:
+        return jsonify({"erro": "Não autorizado"}), 401
+
+    licencas = load_licencas()
+
+    if email in licencas:
+        del licencas[email]
         save_licencas(licencas)
 
     return jsonify({"ok": True})
